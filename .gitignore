@@ -1,0 +1,4 @@
+data/raw/*.geojson
+out/*.kml
+__pycache__/
+*.pyc
