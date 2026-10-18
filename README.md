@@ -2,7 +2,7 @@
 
 Crown land polygons for BC, Alberta, Saskatchewan, Manitoba and Ontario, pulled from each province's open GIS server and written out as KML files that load into Gaia GPS on an iPhone. I made it so I could see where I'm allowed to pull off and camp without cell service.
 
-Three files do the work. `fetch.py` takes a province code and a bounding box, asks the province's server for every polygon inside the box in WGS84, pages through the server's feature cap, retries with backoff when the server times out, reprojects if the server sends back BC Albers or 10TM anyway, and saves the raw GeoJSON to `data/raw/{province}_{bbox_hash}.geojson`. `to_kml.py` reads that file, throws away every attribute except one name field, simplifies the outlines with a tolerance in degrees, and writes `out/{province}.kml`. If the file lands over 5 MB it doubles the tolerance and tries again up to six times, because Gaia on an iPhone gets sluggish above that. It prints the final size and feature count. `run.sh` runs both for all five provinces with default boxes and warns about any output over 5 MB. The sources themselves, endpoint, layer, name field candidates, live in `sources.py`.
+Three files do the work. `fetch.py` takes a province code and a bounding box, asks the province's server for every polygon inside the box in WGS84, pages through the server's feature cap, retries with backoff when the server times out, reprojects if the server sends back BC Albers or 10TM anyway, and saves the raw GeoJSON to `data/raw/{province}_{bbox_hash}.geojson`. `to_kml.py` reads that file, throws away every attribute except one name field, simplifies the outlines with a tolerance in degrees, and writes `out/{province}.kml`. If the file lands over 5 MB it doubles the tolerance and tries again up to six times, because Gaia on an iPhone gets sluggish above that. It prints the final size and feature count. `run.sh` runs both for all five provinces with default boxes and warns about any output over 5 MB. Give it province codes, `./run.sh bc on`, to do only those. The sources themselves, endpoint, layer, name field candidates, live in `sources.py`.
 
 Setup is `pip install -r requirements.txt`, then `./run.sh`. To do one province by hand:
 
@@ -27,7 +27,19 @@ Manitoba has no open crown land parcel layer at all. The old Manitoba Land Initi
 
 Ontario is the Crown Land Use Policy Atlas provincial layer from Land Information Ontario. It covers the area of the undertaking, roughly everything north of the French and Mattawa rivers, and includes provincial parks and conservation reserves as their own polygons. Southern Ontario is mostly private, so a box down there returns little. The name field is the policy area name, which is more useful in Gaia than a parcel id.
 
-Getting the KML onto the phone. AirDrop or iCloud Drive the file from `out/` so it shows up in the Files app. In Files, long press the KML, pick Share, and choose Gaia GPS from the share sheet. Gaia imports it as a folder of tracks under Saved. If Gaia is not in the sheet, scroll to the end, tap More, and turn it on. Do all of this on Wi-Fi with the maps downloaded for the area first, because the import itself does not fetch any tiles.
+If all you have is a phone, you do not need to run any of this. A GitHub Actions workflow in `.github/workflows/build.yml` runs the whole pipeline on GitHub's servers on every push to main and on the first of each month, and attaches the five KML files to a release called latest. Each file is a plain link:
+
+```
+https://github.com/katsuma0/crown-land/releases/latest/download/bc.kml
+https://github.com/katsuma0/crown-land/releases/latest/download/ab.kml
+https://github.com/katsuma0/crown-land/releases/latest/download/sk.kml
+https://github.com/katsuma0/crown-land/releases/latest/download/mb.kml
+https://github.com/katsuma0/crown-land/releases/latest/download/on.kml
+```
+
+Open one in Safari on the iPhone, tap Download when it asks, and it lands in Files under Downloads. To rebuild by hand, open the repo in Safari, tap Actions, tap build kml, tap Run workflow. Each province builds on its own, so if Alberta times out the other four still get published, and the release notes say which ones made it.
+
+Getting a KML from a Mac onto the phone. AirDrop or iCloud Drive the file from `out/` so it shows up in the Files app. In Files, long press the KML, pick Share, and choose Gaia GPS from the share sheet. Gaia imports it as a folder of tracks under Saved. If Gaia is not in the sheet, scroll to the end, tap More, and turn it on. Do all of this on Wi-Fi with the maps downloaded for the area first, because the import itself does not fetch any tiles.
 
 Gaia draws KML polygons as outlines with no fill, no matter what the style block in the file says. You get a green line around each crown parcel and nothing inside it. That is enough to tell which side of the line you are on, but it means a dense area of small parcels looks like a tangle at low zoom. Zoom in.
 

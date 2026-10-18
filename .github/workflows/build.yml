@@ -1,0 +1,67 @@
+# Builds the KML files on GitHub's servers and attaches them to the
+# "latest" release, so they can be downloaded straight to a phone.
+# Runs on every push to main, on the first of each month, and by hand
+# from the Actions tab.
+name: build kml
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        province: [bc, ab, sk, mb, on]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: ./run.sh ${{ matrix.province }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kml-${{ matrix.province }}
+          path: out/${{ matrix.province }}.kml
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          pattern: kml-*
+          merge-multiple: true
+      - name: publish to the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l out
+          files=$(ls out/*.kml 2>/dev/null || true)
+          if [ -z "$files" ]; then
+            echo "no kml files were built, not touching the release"
+            exit 1
+          fi
+          built=$(basename -a $files | sed 's/\.kml$//' | tr '\n' ' ')
+          notes="Built $(date -u +%Y-%m-%d) from $GITHUB_SHA. Provinces: $built. Tap a file below in Safari, then share it from Files into Gaia GPS."
+          if gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit latest --repo "$GITHUB_REPOSITORY" --notes "$notes" --target "$GITHUB_SHA"
+          else
+            gh release create latest --repo "$GITHUB_REPOSITORY" --title "Crown land KML" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload latest --repo "$GITHUB_REPOSITORY" --clobber $files
