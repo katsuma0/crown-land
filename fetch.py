@@ -58,7 +58,13 @@ def get(session, url, params, want="json"):
             if r.status_code >= 400:
                 # A 404 or 400 will not fix itself, so do not burn retries on it.
                 raise SystemExit(f"{r.status_code} from {r.url}\n{r.text[:300]}")
-            data = r.json() if want == "json" else r.text
+            try:
+                data = r.json() if want == "json" else r.text
+            except ValueError:
+                # Say what came back instead of JSON, otherwise a WAF page or
+                # an XML exception is invisible in the job log.
+                log(f"  not JSON ({r.headers.get('Content-Type', '?')}): {r.text[:300]!r}")
+                raise
             # ArcGIS reports errors as 200 with an error body.
             if isinstance(data, dict) and "error" in data:
                 raise requests.HTTPError(f"server error body: {data['error']}", response=r)
@@ -77,25 +83,28 @@ def fetch_wfs(session, src, bbox, page_size):
     url = src["url"]
     layer = src["layer"]
     log(f"endpoint: {url}")
-    log(f"layer: {layer} (WFS 1.1.0, GeoJSON, EPSG:4326 requested)")
+    log(f"layer: {layer} (WFS 2.0.0, GeoJSON, EPSG:4326 requested)")
     features = []
     start = 0
     while True:
         params = {
             "service": "WFS",
-            "version": "1.1.0",
+            "version": "2.0.0",
             "request": "GetFeature",
-            "typeName": layer,
-            "outputFormat": "json",
+            "typeNames": layer,
+            "outputFormat": "application/json",
             "srsName": "EPSG:4326",
             "bbox": ",".join(str(v) for v in bbox) + ",EPSG:4326",
-            "maxFeatures": page_size,
+            "count": page_size,
             "startIndex": start,
         }
+        # GeoServer paging is only stable with a sort, see the bcdata docs.
+        if src.get("sort_by"):
+            params["sortBy"] = src["sort_by"]
         data = get(session, url, params)
         page = data.get("features", [])
         features.extend(page)
-        total = data.get("totalFeatures") or data.get("numberMatched")
+        total = data.get("numberMatched") or data.get("totalFeatures")
         log(f"  page at {start}: {len(page)} features" + (f" of {total}" if total else ""))
         if len(page) < page_size:
             break
@@ -176,6 +185,9 @@ def fetch_arcgis(session, src, bbox, page_size, where_override):
         "returnGeometry": "true",
         "f": "geojson",
     }
+    # Per source extras such as maxAllowableOffset, which has the server
+    # generalize geometry before it leaves and keeps slow servers alive.
+    base.update(src.get("query_extra", {}))
     query = f"{layer_url}/query"
     features = []
     if info["paging"]:

@@ -16,6 +16,7 @@ from xml.sax.saxutils import escape
 
 import geopandas as gpd
 from shapely.geometry import MultiPolygon, Polygon
+from shapely.ops import unary_union
 
 from sources import SOURCES
 
@@ -40,6 +41,19 @@ def pick_name_field(gdf, candidates):
             return c
     strings = [c for c in gdf.columns if c != "geometry" and gdf[c].dtype == object]
     return strings[0] if strings else None
+
+
+def dissolve(gdf, title):
+    """Merge touching polygons into blocks. Names are lost, so every block
+    gets the title. The small buffer closes slivers between parcels that
+    share an edge on paper but not quite in the data."""
+    pad = 0.0002  # about 20 m
+    merged = unary_union(gdf.geometry.buffer(pad).values).buffer(-pad)
+    parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+    parts = [g for g in parts if g.geom_type in ("Polygon", "MultiPolygon") and not g.is_empty]
+    out = gpd.GeoDataFrame({"name": [title] * len(parts)}, geometry=parts, crs=gdf.crs)
+    log(f"dissolved {len(gdf)} features into {len(out)} blocks")
+    return out
 
 
 def ring(coords):
@@ -114,6 +128,10 @@ def main():
     out = Path(args.out) if args.out else OUT_DIR / f"{args.province}.kml"
     out.parent.mkdir(parents=True, exist_ok=True)
     title = f"Crown land {args.province.upper()}"
+
+    if SOURCES[args.province].get("dissolve"):
+        gdf = dissolve(gdf, title)
+        name_field = "name"
 
     tol = args.tolerance
     for attempt in range(6):

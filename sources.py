@@ -13,8 +13,12 @@ what each one actually is so nobody mistakes the map for a title search.
 SOURCES = {
     "bc": {
         "kind": "wfs",
-        "url": "https://openmaps.gov.bc.ca/geo/pub/WHSE_TANTALIS.TA_CROWN_INVENTORY_SVW/ows",
+        # The shared WFS endpoint and WFS 2.0 paging, which is what the
+        # bcdata R and Python packages use. The per layer /ows endpoint
+        # answered the first live run with something that was not JSON.
+        "url": "https://openmaps.gov.bc.ca/geo/pub/wfs",
         "layer": "pub:WHSE_TANTALIS.TA_CROWN_INVENTORY_SVW",
+        "sort_by": "OBJECTID",
         "name_fields": ["CROWN_LANDS_FILE", "CROWN_INVENTORY_ID", "OBJECTID"],
         "page_size": 10000,
         "note": "TANTALIS Crown Land Inventory. Active and applied for crown "
@@ -22,26 +26,25 @@ SOURCES = {
     },
     "ab": {
         "kind": "arcgis",
-        "url": "https://geospatial.alberta.ca/titan/rest/services/cadastre/"
-               "cadastral_and_land_ownership_view_only_10tm_nad83_aep/MapServer",
-        # Layer ids on this service are not stable, so fetch.py looks the
-        # layer up by name and prints what it picked.
-        "layer_name_pattern": r"land\s*ownership",
-        "layer": 11,
-        "name_fields": ["PID", "LINC", "PARCEL_ID", "OBJECTID"],
-        # Land Ownership holds freehold, crown and unpatented parcels
-        # together. Keep only the crown ones. The first field in this list
-        # that exists on the layer is used. If none exists the fetch runs
-        # unfiltered and warns.
-        "crown_filter": {
-            "fields": ["OWNERSHIP_TYPE", "OWNER_TYPE", "OWNERSHIP", "PARCEL_TYPE", "TITLE_TYPE"],
-            "sql": "UPPER({field}) LIKE '%CROWN%' OR UPPER({field}) LIKE '%UNTITLED%' OR UPPER({field}) LIKE '%UNPATENTED%'",
-        },
+        # Crown Ownership Classes, a hosted layer built from the Land
+        # Ownership parcels and cut down to titles held by provincial,
+        # federal and municipal crown agencies. The old titan
+        # cadastral_and_land_ownership service returned 404 on 2026-10-18.
+        # The "owndership" spelling is theirs. It is a project layer, so if
+        # it vanishes the job log will show a 404 and this entry needs a
+        # new home.
+        "url": "https://geospatial.alberta.ca/arcgis/rest/services/Hosted/"
+               "Land_use_owndership_NN_project/FeatureServer",
+        "layer_name_pattern": r"crown\s*ownership",
+        "layer": 10,
+        # CROWNNAME is the title holder, which tells provincial crown from a
+        # town or the federal government on the map.
+        "name_fields": ["CROWNNAME", "SHORTLEGAL", "CROWNCLASS", "OBJECTID"],
         "page_size": 2000,
-        "note": "Alberta Land Ownership (Alberta Data Partnerships title "
-                "mapping via GeoDiscover). Parcel extents for freehold, crown "
-                "and unpatented land outside Calgary, Edmonton and federal "
-                "lands. Served in 10TM NAD83, reprojected here.",
+        "note": "Alberta crown ownership classes from the Land Ownership "
+                "parcels. Provincial, federal and municipal crown titles, "
+                "named by the title holder. No Calgary, the city keeps its "
+                "own data.",
     },
     "sk": {
         "kind": "arcgis",
@@ -50,6 +53,9 @@ SOURCES = {
         "layer": 2,
         "name_fields": ["NAME", "QUARTER", "OBJECTID"],
         "page_size": 2000,
+        # Sixty thousand quarter sections made a 16 MB KML. Touching quarters
+        # are merged into blocks before writing, which is also a better map.
+        "dissolve": True,
         "note": "Ministry of Agriculture crown land by quarter section and "
                 "river lot. A quarter is shown when any part of it is "
                 "agricultural crown land, and most of it is under lease. "
@@ -61,7 +67,7 @@ SOURCES = {
                "Manitoba_Provincial_Forests___Version_6/FeatureServer",
         "layer_name_pattern": r"provincial\s*forest",
         "layer": 1,
-        "name_fields": ["NAME", "FOREST_NAME", "NAME_E", "PF_NAME", "OBJECTID"],
+        "name_fields": ["PROV_FOREST_NAME", "NAME", "FOREST_NAME", "OBJECTID"],
         "page_size": 2000,
         "note": "Manitoba Provincial Forests from Data MB. Manitoba has no "
                 "open crown land parcel layer, and the old MLI downloads "
@@ -71,10 +77,14 @@ SOURCES = {
     "on": {
         "kind": "arcgis",
         "url": "https://ws.lioservices.lrc.gov.on.ca/arcgis2/rest/services/LIO_OPEN_DATA/LIO_Open06/MapServer",
-        "layer_name_pattern": r"crown\s*land\s*use\s*policy\s*area.*provincial",
+        "layer_name_pattern": r"clupa\s*provincial",
         "layer": 5,
-        "name_fields": ["ENGLISH_NAME", "NAME_ENG", "POLICY_NAME_ENG", "POLICY_IDENT", "OGF_ID"],
-        "page_size": 1000,
+        "name_fields": ["NAME_ENG", "POLICY_IDENT", "OGF_ID"],
+        # Pages of 1000 full resolution polygons timed the LIO server out at
+        # two minutes. Small pages, and the server generalizes the geometry
+        # to about 50 m before sending, which is all the KML keeps anyway.
+        "page_size": 250,
+        "query_extra": {"maxAllowableOffset": 0.0005, "geometryPrecision": 5},
         "note": "CLUPA provincial from Land Information Ontario. Every crown "
                 "land use area in the area of the undertaking, which is the "
                 "north. Includes parks and conservation reserves as their own "
