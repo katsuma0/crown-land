@@ -190,28 +190,41 @@ def fetch_arcgis(session, src, bbox, page_size, where_override):
     base.update(src.get("query_extra", {}))
     query = f"{layer_url}/query"
     features = []
-    if info["paging"]:
+    if info["paging"] and not src.get("page_by_ids"):
         offset = 0
+        last_first = None
         while True:
             data = get(session, query, {**base, "resultOffset": offset, "resultRecordCount": page_size})
             page = data.get("features", [])
+            if not page:
+                break
+            # A server that ignores resultOffset hands back the same page
+            # forever. Spot it by the first feature's id.
+            first = page[0].get("id", (page[0].get("properties") or {}).get(info["oid"]))
+            if first is not None and first == last_first:
+                log("  server repeated a page, it ignores resultOffset; stopping")
+                break
+            last_first = first
             features.extend(page)
             log(f"  page at {offset}: {len(page)} features")
-            more = data.get("properties", {}).get("exceededTransferLimit") or data.get("exceededTransferLimit")
-            if len(page) < page_size and not more:
-                break
-            if not page:
+            # Older servers leave exceededTransferLimit out of GeoJSON, and
+            # a short page is not proof of the end (LIO sent 249 of 250), so
+            # only stop early when the server says outright there is no more.
+            more = data.get("exceededTransferLimit", (data.get("properties") or {}).get("exceededTransferLimit"))
+            if len(page) < page_size and more is False:
                 break
             offset += len(page)
     else:
-        # Old servers: pull every object id in the bbox, then fetch in chunks.
+        # Pull every object id in the bbox, then fetch in chunks by id. This
+        # is the path for old servers and for ones that page badly; it also
+        # prints the true total up front.
         ids = get(session, query, {**base, "returnIdsOnly": "true", "f": "json"})
         oid_field = ids.get("objectIdFieldName", info["oid"])
         oids = sorted(ids.get("objectIds") or [])
         log(f"  {len(oids)} object ids in bbox, fetching by id in chunks of {page_size}")
         for i in range(0, len(oids), page_size):
             chunk = oids[i:i + page_size]
-            data = get(session, query, {**base, "where": f"{oid_field} >= {chunk[0]} AND {oid_field} <= {chunk[-1]}"})
+            data = get(session, query, {**base, "where": f"({where}) AND {oid_field} >= {chunk[0]} AND {oid_field} <= {chunk[-1]}"})
             page = data.get("features", [])
             features.extend(page)
             log(f"  ids {chunk[0]}..{chunk[-1]}: {len(page)} features")

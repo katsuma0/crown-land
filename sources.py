@@ -84,6 +84,10 @@ SOURCES = {
         # two minutes. Small pages, and the server generalizes the geometry
         # to about 50 m before sending, which is all the KML keeps anyway.
         "page_size": 250,
+        # The server leaves exceededTransferLimit out of GeoJSON and sent
+        # 249 for a page of 250, so offset paging cannot tell where the end
+        # is. Fetching by object id chunks also prints the true total.
+        "page_by_ids": True,
         "query_extra": {"maxAllowableOffset": 0.0005, "geometryPrecision": 5},
         "note": "CLUPA provincial from Land Information Ontario. Every crown "
                 "land use area in the area of the undertaking, which is the "
