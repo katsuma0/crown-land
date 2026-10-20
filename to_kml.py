@@ -11,10 +11,12 @@ Gaia on an iPhone gets slow above about 5 MB.
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
@@ -36,10 +38,13 @@ def newest_raw(province):
 
 
 def pick_name_field(gdf, candidates):
+    # Hosted ArcGIS layers lower case their field names, so match loosely.
+    cols = {c.lower(): c for c in gdf.columns}
     for c in candidates:
-        if c in gdf.columns:
-            return c
-    strings = [c for c in gdf.columns if c != "geometry" and gdf[c].dtype == object]
+        if c.lower() in cols:
+            return cols[c.lower()]
+    # pandas 3 reads text as a string dtype, not object, so ask properly.
+    strings = [c for c in gdf.columns if c != "geometry" and pd.api.types.is_string_dtype(gdf[c])]
     return strings[0] if strings else None
 
 
@@ -48,7 +53,11 @@ def dissolve(gdf, title):
     gets the title. The small buffer closes slivers between parcels that
     share an edge on paper but not quite in the data."""
     pad = 0.0002  # about 20 m
-    merged = unary_union(gdf.geometry.buffer(pad).values).buffer(-pad)
+    with warnings.catch_warnings():
+        # Buffering in degrees is the point here, the pad only needs to be
+        # bigger than the slivers, so the geographic CRS warning is noise.
+        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS")
+        merged = unary_union(gdf.geometry.buffer(pad).values).buffer(-pad)
     parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
     parts = [g for g in parts if g.geom_type in ("Polygon", "MultiPolygon") and not g.is_empty]
     out = gpd.GeoDataFrame({"name": [title] * len(parts)}, geometry=parts, crs=gdf.crs)
